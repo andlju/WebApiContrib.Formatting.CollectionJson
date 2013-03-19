@@ -5,9 +5,51 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Formatting;
 using System.Threading.Tasks;
+using System.Web.Http.Controllers;
 
 namespace WebApiContrib.Formatting.CollectionJson
 {
+    public class TypeMappedCollectionJsonFormatterAttribute : Attribute, IControllerConfiguration
+    {
+        private readonly Type[] _mappers;
+
+        public TypeMappedCollectionJsonFormatterAttribute(params Type[] mappers)
+        {
+            _mappers = mappers;
+        }
+
+        public void Initialize(HttpControllerSettings settings,
+            HttpControllerDescriptor descriptor)
+        {
+            var formatter = new TypeMappedCollectionJsonFormatter();
+            foreach (var mapper in _mappers)
+            {
+                var mapperInterfaces = mapper.GetInterfaces();
+                foreach (var mapperInterface in mapperInterfaces)
+                {
+                    if (mapperInterface.Name == "ICollectionJsonDocumentWriter`1")
+                    {
+                        var type = mapperInterface.GetGenericArguments()[0];
+                        formatter.GetType()
+                                 .GetMethod("RegisterWriter")
+                                 .MakeGenericMethod(type)
+                                 .Invoke(formatter, new object[] { Activator.CreateInstance(mapper) });
+                    }
+                    if (mapperInterface.Name == "ICollectionJsonDocumentReader`1")
+                    {
+                        var type = mapperInterface.GetGenericArguments()[0];
+                        formatter.GetType()
+                                 .GetMethod("RegisterReader")
+                                 .MakeGenericMethod(type)
+                                 .Invoke(formatter, new object[] { Activator.CreateInstance(mapper) });
+                    }
+                }
+            }
+
+            settings.Formatters.Add(formatter);
+        }
+    }
+
     public class TypeMappedCollectionJsonFormatter : CollectionJsonFormatter
     {
         private IDictionary<Type, object> _readers = new Dictionary<Type, object>();
@@ -52,8 +94,6 @@ namespace WebApiContrib.Formatting.CollectionJson
                 ContinueWith(state =>
                                  {
                                      var doc = state.Result as WriteDocument;
-                                     if (type == typeof(WriteDocument))
-                                         return doc;
 
                                      return InvokeReadMethod(_readers[type], doc);
                                  });
@@ -67,9 +107,10 @@ namespace WebApiContrib.Formatting.CollectionJson
             {
                 return base.WriteToStreamAsync(type, value, writeStream, content, transportContext);
             }
-            if (type.IsGenericType && type.GetInterface("IEnumerable") != null)
+            var enumInterface = type.GetInterface("IEnumerable`1");
+            if (enumInterface != null)
             {
-                type = type.GetGenericArguments()[0];
+                type = enumInterface.GetGenericArguments()[0];
             }
             else
             {

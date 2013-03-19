@@ -5,6 +5,8 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Web.Http;
+using System.Web.Http.Controllers;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Should;
@@ -35,9 +37,9 @@ namespace WebApiContrib.Formatting.CollectionJson.Tests
         public ReadDocument Write(IEnumerable<TestOutputOnly> data)
         {
             var doc = new ReadDocument();
-            var item = new Item();
             foreach (var dataItem in data)
             {
+                var item = new Item();
                 item.Data.Add(new Data() { Name = "stringProperty", Value = dataItem.StringProperty });
                 item.Data.Add(new Data() { Name = "integerProperty", Value = dataItem.IntegerProperty.ToString() });
                 doc.Collection.Items.Add(item);
@@ -72,9 +74,9 @@ namespace WebApiContrib.Formatting.CollectionJson.Tests
         public ReadDocument Write(IEnumerable<TestInputAndOutput> data)
         {
             var doc = new ReadDocument();
-            var item = new Item();
             foreach (var dataItem in data)
             {
+                var item = new Item();
                 item.Data.Add(new Data() { Name = "stringProperty", Value = dataItem.StringProperty });
                 item.Data.Add(new Data() { Name = "integerProperty", Value = dataItem.IntegerProperty.ToString() });
                 doc.Collection.Items.Add(item);
@@ -86,6 +88,7 @@ namespace WebApiContrib.Formatting.CollectionJson.Tests
     public class TypeMappedFormatterTest
     {
         private TypeMappedCollectionJsonFormatter formatter = new TypeMappedCollectionJsonFormatter();
+        private JObject _sampleWriteDocument;
 
         public TypeMappedFormatterTest()
         {
@@ -93,6 +96,19 @@ namespace WebApiContrib.Formatting.CollectionJson.Tests
             formatter.RegisterReader(new TestInputReader());
             formatter.RegisterReader(new TestInputAndOutputReaderAndWriter());
             formatter.RegisterWriter(new TestInputAndOutputReaderAndWriter());
+
+            _sampleWriteDocument = JObject.FromObject(new
+            {
+                template = new
+                {
+                    data = new object[]
+                                {
+                                    new {name = "stringProperty", value = "Hello World"},
+                                    new {name = "integerProperty", value = "1337"}
+                                }
+                }
+            });
+
         }
 
         [Fact]
@@ -120,22 +136,33 @@ namespace WebApiContrib.Formatting.CollectionJson.Tests
         }
 
         [Fact]
+        public void ShouldBeAbleToWriteReadDocument()
+        {
+            formatter.CanWriteType(typeof(ReadDocument));
+        }
+
+        [Fact]
+        public void WhenReaderIsRegisteredShouldBeAbleToReadSingleItem()
+        {
+            formatter.CanReadType(typeof(TestInputOnly));
+        }
+
+        [Fact]
+        public void WhenReaderIsNotRegisteredShouldNotBeAbleToReadSingleItem()
+        {
+            formatter.CanReadType(typeof(TestOutputOnly));
+        }
+
+        [Fact]
+        public void ShouldBeAbleToReadWriteDocument()
+        {
+            formatter.CanReadType(typeof(WriteDocument));
+        }
+
+        [Fact]
         public void WhenReadingRegisteredTypeShouldReturnInstance()
         {
-            var obj = JObject.FromObject(new
-                                             {
-                                                 template = new
-                                                                {
-                                                                    data = new object[]
-                                                                               {
-                                                                                   new {name = "stringProperty", value = "Hello World"},
-                                                                                   new {name = "integerProperty", value = "1337"}
-                                                                               }
-                                                                }
-                                             });
-
-            
-            var jsonDoc = obj.ToString();
+            var jsonDoc = _sampleWriteDocument.ToString();
             var stream = new MemoryStream();
             var writer = new StreamWriter(stream, Encoding.UTF8);
             writer.Write(jsonDoc);
@@ -148,14 +175,40 @@ namespace WebApiContrib.Formatting.CollectionJson.Tests
 
             stream.Seek(0, SeekOrigin.Begin);
 
-            var newDoc = formatter.ReadFromStreamAsync(typeof(TestInputOnly), stream, content, null).Result;//  as WriteDocument;
+            var obj = formatter.ReadFromStreamAsync(typeof(TestInputOnly), stream, content, null).Result;
 
-            newDoc.ShouldNotBeNull();
-            newDoc.ShouldBeType<TestInputOnly>();
+            obj.ShouldNotBeNull();
+            obj.ShouldBeType<TestInputOnly>();
+            
+            var testObj = (TestInputOnly)obj;
+            testObj.StringProperty.ShouldEqual("Hello World");
+            testObj.IntegerProperty.ShouldEqual(1337);
         }
 
         [Fact]
-        public void WhenWritingRegisteredTypeShouldReturnJson()
+        public void WhenReadingWriteDocumentShouldReturnWriteDocument()
+        {
+            var jsonDoc = _sampleWriteDocument.ToString();
+            var stream = new MemoryStream();
+            var writer = new StreamWriter(stream, Encoding.UTF8);
+            writer.Write(jsonDoc);
+            writer.Flush();
+
+            HttpContent content = new StringContent(String.Empty);
+            HttpContentHeaders contentHeaders = content.Headers;
+            contentHeaders.ContentLength = stream.Length;
+            contentHeaders.ContentType = new MediaTypeHeaderValue("application/vnd.collection+json");
+
+            stream.Seek(0, SeekOrigin.Begin);
+
+            var newDoc = formatter.ReadFromStreamAsync(typeof(WriteDocument), stream, content, null).Result;//  as WriteDocument;
+
+            newDoc.ShouldNotBeNull();
+            newDoc.ShouldBeType<WriteDocument>();
+        }
+
+        [Fact]
+        public void WhenWritingSingleRegisteredTypeShouldReturnJson()
         {
             var testObj = new TestOutputOnly() {StringProperty = "Hello World", IntegerProperty = 1337};
 
@@ -167,7 +220,123 @@ namespace WebApiContrib.Formatting.CollectionJson.Tests
 
             var result = new StreamReader(stream).ReadToEnd();
             result.ShouldNotBeNull();
-            result.ShouldContain("Hello World");
+
+            var doc = JsonConvert.DeserializeObject<ReadDocument>(result);
+
+            doc.Collection.ShouldNotBeNull();
+
+            doc.Collection.Items.ShouldNotBeEmpty();
+            doc.Collection.Items[0].Data.ShouldNotBeEmpty();
+            doc.Collection.Items[0].Data[0].Name.ShouldEqual("stringProperty");
+            doc.Collection.Items[0].Data[0].Value.ShouldEqual("Hello World");
+            doc.Collection.Items[0].Data[1].Name.ShouldEqual("integerProperty");
+            doc.Collection.Items[0].Data[1].Value.ShouldEqual("1337");
+        }
+
+        [Fact]
+        public void WhenWritingMultipleRegisteredTypeShouldReturnJson()
+        {
+            var testObjs = new[]
+                {
+                    new TestOutputOnly() {StringProperty = "Hello World", IntegerProperty = 1337},
+                    new TestOutputOnly() {StringProperty = "Hello Again", IntegerProperty = 4711}
+                };
+
+            var stream = new MemoryStream();
+
+            formatter.WriteToStreamAsync(testObjs.GetType(), testObjs, stream, null, null).Wait();
+
+            stream.Seek(0, SeekOrigin.Begin);
+
+            var result = new StreamReader(stream).ReadToEnd();
+            result.ShouldNotBeNull();
+
+            var doc = JsonConvert.DeserializeObject<ReadDocument>(result);
+
+            doc.Collection.ShouldNotBeNull();
+
+            doc.Collection.Items.ShouldNotBeEmpty();
+            doc.Collection.Items[0].Data.ShouldNotBeEmpty();
+            doc.Collection.Items[0].Data[0].Name.ShouldEqual("stringProperty");
+            doc.Collection.Items[0].Data[0].Value.ShouldEqual("Hello World");
+            doc.Collection.Items[0].Data[1].Name.ShouldEqual("integerProperty");
+            doc.Collection.Items[0].Data[1].Value.ShouldEqual("1337");
+            doc.Collection.Items[1].Data[0].Name.ShouldEqual("stringProperty");
+            doc.Collection.Items[1].Data[0].Value.ShouldEqual("Hello Again");
+            doc.Collection.Items[1].Data[1].Name.ShouldEqual("integerProperty");
+            doc.Collection.Items[1].Data[1].Value.ShouldEqual("4711");
+        }
+    }
+
+    public class TypeMappedFormatterAttributeTest
+    {
+        public TypeMappedFormatterAttributeTest()
+        {
+            
+        }
+
+        [Fact]
+        public void AttributeWithSingleInputReader()
+        {
+            var attr = new TypeMappedCollectionJsonFormatterAttribute(typeof(TestInputReader));
+
+            var controllerSettings = new HttpControllerSettings(new HttpConfiguration());
+
+            attr.Initialize(controllerSettings, null);
+
+            var addedFormatter = controllerSettings.Formatters.SingleOrDefault(f => f is TypeMappedCollectionJsonFormatter);
+
+            addedFormatter.ShouldNotBeNull();
+            addedFormatter.CanReadType(typeof(TestInputOnly)).ShouldBeTrue();
+            addedFormatter.CanReadType(typeof(TestOutputOnly)).ShouldBeFalse();
+        }
+
+        [Fact]
+        public void AttributeWithMultipleReaders()
+        {
+            var attr = new TypeMappedCollectionJsonFormatterAttribute(typeof(TestInputReader), typeof(TestInputAndOutputReaderAndWriter));
+
+            var controllerSettings = new HttpControllerSettings(new HttpConfiguration());
+
+            attr.Initialize(controllerSettings, null);
+
+            var addedFormatter = controllerSettings.Formatters.SingleOrDefault(f => f is TypeMappedCollectionJsonFormatter);
+
+            addedFormatter.ShouldNotBeNull();
+            addedFormatter.CanReadType(typeof(TestInputOnly)).ShouldBeTrue();
+            addedFormatter.CanReadType(typeof(TestInputAndOutput)).ShouldBeTrue();
+        }
+
+        [Fact]
+        public void AttributeWithSingleWriter()
+        {
+            var attr = new TypeMappedCollectionJsonFormatterAttribute(typeof(TestOutputWriter));
+
+            var controllerSettings = new HttpControllerSettings(new HttpConfiguration());
+
+            attr.Initialize(controllerSettings, null);
+
+            var addedFormatter = controllerSettings.Formatters.SingleOrDefault(f => f is TypeMappedCollectionJsonFormatter);
+
+            addedFormatter.ShouldNotBeNull();
+            addedFormatter.CanWriteType(typeof(TestOutputOnly)).ShouldBeTrue();
+            addedFormatter.CanWriteType(typeof(TestInputOnly)).ShouldBeFalse();
+        }
+
+        [Fact]
+        public void AttributeWithMultipleWriters()
+        {
+            var attr = new TypeMappedCollectionJsonFormatterAttribute(typeof(TestOutputWriter), typeof(TestInputAndOutputReaderAndWriter));
+
+            var controllerSettings = new HttpControllerSettings(new HttpConfiguration());
+
+            attr.Initialize(controllerSettings, null);
+
+            var addedFormatter = controllerSettings.Formatters.SingleOrDefault(f => f is TypeMappedCollectionJsonFormatter);
+
+            addedFormatter.ShouldNotBeNull();
+            addedFormatter.CanWriteType(typeof(TestOutputOnly)).ShouldBeTrue();
+            addedFormatter.CanWriteType(typeof(TestInputAndOutput)).ShouldBeTrue();
         }
     }
 }
