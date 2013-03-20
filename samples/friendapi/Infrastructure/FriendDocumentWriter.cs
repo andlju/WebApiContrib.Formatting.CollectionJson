@@ -12,8 +12,9 @@ namespace WebApiContrib.Formatting.CollectionJson.Infrastructure
         public ReadDocument Write(IEnumerable<Friend> friends)
         {
             var document = new ReadDocument();
-            var collection = new Collection { Version = "1.0", Href = new Uri("http://example.org/friends/") };
-            document.Collection = collection;
+            var collection = document.Collection;
+            collection.Version = "1.0";
+            collection.Href = new Uri("http://example.org/friends/");
 
             collection.Links.Add(new Link { Rel = "Feed", Href = new Uri("http://example.org/friends/rss") });
 

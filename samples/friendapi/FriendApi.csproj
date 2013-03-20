@@ -71,6 +71,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Controllers\FriendsController.cs" />
+    <Compile Include="Controllers\TypeMappedFriendsController.cs" />
     <Compile Include="Infrastructure\FriendDocumentWriter.cs" />
     <Compile Include="Infrastructure\FriendDocumentReader.cs" />
     <Compile Include="Models\TemplateExtensions.cs" />
