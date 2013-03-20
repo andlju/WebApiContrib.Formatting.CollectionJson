@@ -107,7 +107,9 @@ namespace WebApiContrib.Formatting.CollectionJson
             {
                 return base.WriteToStreamAsync(type, value, writeStream, content, transportContext);
             }
-            var enumInterface = type.GetInterface("IEnumerable`1");
+
+            var enumInterface = type.Name == "IEnumerable`1" ? type : type.GetInterface("IEnumerable`1");
+
             if (enumInterface != null)
             {
                 type = enumInterface.GetGenericArguments()[0];
